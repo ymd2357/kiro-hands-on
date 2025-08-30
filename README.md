@@ -1,5 +1,9 @@
 # Kiro Hands-on Starter
 
+## ダウンロード
+
+常に最新の教材は [Releases ページ](../../releases/latest) から取得できます。
+
 ## 学習ドキュメントのダウンロード
 - 個別ファイル: [docs/LEARNING.md](docs/LEARNING.md)
 - まとめ版README: [README.full.md](README.full.md)
