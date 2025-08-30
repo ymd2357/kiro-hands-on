@@ -1,0 +1,12 @@
+{
+  "name": "kiro-hands-on-starter",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build:readme": "cat README.header.md docs/LEARNING.md > README.full.md"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "ts-node": "^10.9.2"
+  }
+}
