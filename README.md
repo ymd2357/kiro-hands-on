@@ -4,6 +4,39 @@
 
 常に最新の教材は [Releases ページ](../../releases/latest) から取得できます。
 
+## 自動デプロイメント
+
+このリポジトリは GitHub Actions を使用して、新しいリリースが公開されたときに自動的にデプロイされます。
+
+### 🚀 運用方法
+
+#### 自動デプロイメント（推奨）
+1. **新しいリリースを作成**
+   - GitHub の [Releases ページ](../../releases) で「Create a new release」をクリック
+   - タグ名を入力（例：`v0.2.0`）
+   - リリースタイトルと説明を記入
+   - 「Publish release」をクリック
+2. **自動実行確認**
+   - [Actions タブ](../../actions) でワークフローの実行状況を確認
+   - デプロイメントが完了するまで数分待機
+
+#### 手動デプロイメント（必要時のみ）
+1. **Actions タブ**から「Deploy Release to Production」を選択
+2. **Run workflow**をクリック
+3. オプションを選択：
+   - `deploy_mode`: `dry-run`（テスト）または `deploy`（本番）
+   - `release_tag`: デプロイするリリースタグ（空白で最新）
+4. **Run workflow**で実行
+
+#### 必要な設定
+デプロイメントには以下のシークレットが必要です（リポジトリ管理者が設定）：
+- `FTP_SERVER`: デプロイ先サーバー
+- `FTP_USERNAME`: FTP ユーザー名  
+- `FTP_PASSWORD`: FTP パスワード
+- `FTP_SERVER_DIR`: デプロイ先ディレクトリ
+
+詳細な技術情報は [DEPLOYMENT.md](DEPLOYMENT.md) を参照してください。
+
 ## 学習ドキュメントのダウンロード
 - 個別ファイル: [docs/LEARNING.md](docs/LEARNING.md)
 - まとめ版README: [README.full.md](README.full.md)
