@@ -4,6 +4,10 @@
 
 常に最新の教材は [Releases ページ](../../releases/latest) から取得できます。
 
+## 自動デプロイメント
+
+このリポジトリは GitHub Actions を使用して、新しいリリースが公開されたときに自動的にデプロイされます。詳細については [デプロイメントワークフロー](.github/workflows/release-deploy.yml) を参照してください。
+
 ## 学習ドキュメントのダウンロード
 - 個別ファイル: [docs/LEARNING.md](docs/LEARNING.md)
 - まとめ版README: [README.full.md](README.full.md)

@@ -1,0 +1,251 @@
+name: Deploy Release to Production
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      deploy_mode:
+        description: 'Deployment mode'
+        required: true
+        default: 'dry-run'
+        type: choice
+        options:
+          - dry-run
+          - deploy
+      release_tag:
+        description: 'Release tag to deploy (leave empty for latest)'
+        required: false
+        type: string
+
+jobs:
+  build-and-prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      has_content: ${{ steps.check_content.outputs.has_content }}
+      release_tag: ${{ steps.get_release.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.release_tag || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Build documentation
+        run: |
+          echo "=== Building complete documentation ==="
+          npm run build:readme
+          echo "✅ Documentation build completed"
+
+      - name: Get release information
+        id: get_release
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "tag=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            echo "Release triggered by: ${{ github.event.release.tag_name }}"
+          elif [ -n "${{ github.event.inputs.release_tag }}" ]; then
+            echo "tag=${{ github.event.inputs.release_tag }}" >> $GITHUB_OUTPUT
+            echo "Manual deployment for tag: ${{ github.event.inputs.release_tag }}"
+          else
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "no-tag")
+            echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "Using latest tag: $LATEST_TAG"
+          fi
+
+      - name: Prepare deployment content
+        run: |
+          echo "=== Preparing deployment content ==="
+          mkdir -p deploy_content
+          
+          # Copy main documentation files
+          cp README.md deploy_content/
+          cp README.full.md deploy_content/
+          cp package.json deploy_content/
+          
+          # Copy docs directory
+          cp -r docs/ deploy_content/docs/
+          
+          # Copy .vscode settings if they exist (for development environment consistency)
+          if [ -d ".vscode" ]; then
+            cp -r .vscode/ deploy_content/.vscode/
+          fi
+          
+          echo "=== Deployment content prepared ==="
+          find deploy_content -type f | sort
+          echo "Total files: $(find deploy_content -type f | wc -l)"
+
+      - name: Check deployment content
+        id: check_content
+        run: |
+          file_count=$(find deploy_content -type f | wc -l)
+          echo "Deployment file count: $file_count"
+          echo "has_content=true" >> $GITHUB_OUTPUT
+          
+          if [ $file_count -eq 0 ]; then
+            echo "has_content=false" >> $GITHUB_OUTPUT
+            echo "❌ No content to deploy"
+            exit 1
+          else
+            echo "✅ Content ready for deployment"
+          fi
+
+      - name: Upload deployment artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-content
+          path: deploy_content/
+          retention-days: 7
+
+  dry-run:
+    needs: build-and-prepare
+    if: needs.build-and-prepare.outputs.has_content == 'true' && (github.event.inputs.deploy_mode == 'dry-run' || github.event_name == 'release')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download deployment content
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-content
+          path: deploy_content/
+
+      - name: FTP Deployment Dry Run
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./deploy_content/
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          dry-run: true
+          log-level: verbose
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.DS_Store
+            **/Thumbs.db
+
+      - name: Dry Run Summary
+        run: |
+          echo "=== Dry Run Completed ==="
+          echo "Release tag: ${{ needs.build-and-prepare.outputs.release_tag }}"
+          echo "Deployment mode: Dry Run"
+          echo "Target server: ${{ secrets.FTP_SERVER && 'Configured' || 'Not configured' }}"
+          echo ""
+          echo "Files prepared for deployment:"
+          find deploy_content -type f | sort
+          echo ""
+          echo "Total files: $(find deploy_content -type f | wc -l)"
+          echo ""
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "✅ Release deployment dry run completed successfully"
+            echo "The actual deployment will proceed automatically for published releases"
+          else
+            echo "To perform actual deployment, set deploy_mode to 'deploy' and re-run the workflow"
+          fi
+
+  deploy-production:
+    needs: build-and-prepare
+    if: needs.build-and-prepare.outputs.has_content == 'true' && ((github.event_name == 'release') || (github.event_name == 'workflow_dispatch' && github.event.inputs.deploy_mode == 'deploy'))
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download deployment content
+        uses: actions/download-artifact@v4
+        with:
+          name: deployment-content
+          path: deploy_content/
+
+      - name: Pre-deployment validation
+        run: |
+          echo "=== Pre-deployment Validation ==="
+          
+          # Validate required files exist
+          required_files=("README.md" "README.full.md" "package.json" "docs/LEARNING.md")
+          for file in "${required_files[@]}"; do
+            if [ -f "deploy_content/$file" ]; then
+              echo "✅ $file exists"
+            else
+              echo "❌ Required file missing: $file"
+              exit 1
+            fi
+          done
+          
+          # Validate README.full.md was built correctly
+          if [ -s "deploy_content/README.full.md" ]; then
+            echo "✅ README.full.md is not empty"
+          else
+            echo "❌ README.full.md is empty or missing"
+            exit 1
+          fi
+          
+          echo "✅ All validation checks passed"
+
+      - name: Production FTP Deployment
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./deploy_content/
+          server-dir: ${{ secrets.FTP_SERVER_DIR }}
+          dry-run: false
+          log-level: verbose
+          dangerous-clean-slate: false
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/.DS_Store
+            **/Thumbs.db
+
+      - name: Post-deployment verification
+        run: |
+          echo "=== Post-deployment Verification ==="
+          echo "✅ Deployment completed successfully"
+          echo "Release tag: ${{ needs.build-and-prepare.outputs.release_tag }}"
+          echo "Deployed files: $(find deploy_content -type f | wc -l)"
+          echo "Deployment timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          
+          # Log deployment summary
+          echo ""
+          echo "=== Deployment Summary ==="
+          echo "Repository: ${{ github.repository }}"
+          echo "Release: ${{ needs.build-and-prepare.outputs.release_tag }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "Triggered by: ${{ github.event_name }}"
+          echo "Actor: ${{ github.actor }}"
+
+      - name: Deployment notification
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "🎉 Deployment successful!"
+            echo "The kiro-hands-on release ${{ needs.build-and-prepare.outputs.release_tag }} has been deployed to production."
+          else
+            echo "❌ Deployment failed!"
+            echo "Please check the workflow logs for details."
+            exit 1
+          fi
+
+  no-content:
+    needs: build-and-prepare
+    if: needs.build-and-prepare.outputs.has_content == 'false'
+    runs-on: ubuntu-latest
+    steps:
+      - name: No content notification
+        run: |
+          echo "=== No Content to Deploy ==="
+          echo "No deployable content was found in the repository."
+          echo "This may indicate a build failure or missing source files."
+          echo "Please check the build-and-prepare job logs for details."
+          exit 1
